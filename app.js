@@ -206,11 +206,14 @@ function renderOrders() {
   </div>
   ${state.orders.length === 0 ? `<p class="empty-state">Tidak ada order.</p>` : `
   <table>
-    <thead><tr><th>ID</th><th>Status</th><th>Estimasi</th><th>Final</th><th>Bayar</th><th>Dibuat</th></tr></thead>
+    <thead><tr><th>Pelanggan</th><th>Status</th><th>Estimasi</th><th>Final</th><th>Bayar</th><th>Dibuat</th></tr></thead>
     <tbody>
       ${state.orders.map((o) => `
         <tr class="clickable" data-action="open-order" data-id="${o.id}">
-          <td>#${o.id}</td>
+          <td>
+            <div style="font-size:14px">${o.customer_name}</div>
+            <div style="font-size:11px;color:var(--text-faint)">#${o.id} · ${o.customer_phone || "-"}</div>
+          </td>
           <td><span class="pill">${STAGES[o.status]}</span></td>
           <td>${fmt(o.estimated_total_price)}</td>
           <td>${o.final_total_price !== null ? fmt(o.final_total_price) : "—"}</td>
@@ -245,7 +248,7 @@ function renderOrderModal() {
   <div class="overlay" data-action="close-modal">
     <div class="panel" data-action="stop-propagation">
       <div class="panel-header">
-        <h3>Order #${order.id} — ${STAGES[order.status]}</h3>
+        <h3>${order.customer_name} <span style="color:var(--text-faint);font-weight:400;font-size:14px">#${order.id}</span> — ${STAGES[order.status]}</h3>
         <button class="close-btn" data-action="close-modal">✕</button>
       </div>
 
