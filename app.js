@@ -294,6 +294,10 @@ function renderOrderModal() {
       <p class="section-title">Alamat & Jadwal</p>
       <p style="font-size:13px;color:var(--text-dim);margin:0">${order.pickup_address}</p>
       <p style="font-size:13px;color:var(--text-dim);margin:2px 0 0">${order.scheduled_pickup_time}</p>
+      ${order.pickup_location_pin ? `
+        <a href="${order.pickup_location_pin}" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-flex;margin-top:8px;text-decoration:none;font-size:13px">
+          📍 Buka Pin Lokasi di Google Maps
+        </a>` : `<p style="font-size:12px;color:var(--text-faint);margin-top:6px">Pelanggan tidak menandai pin lokasi.</p>`}
 
       <p class="section-title">Histori Status</p>
       ${o.history.map((h) => `
@@ -546,13 +550,25 @@ function renderMasterData() {
       </div>
     </div>`).join("")}
 
-  <p class="section-title">Multiplier Durasi</p>
+  <p class="section-title">Durasi Pengerjaan — Multiplier Kiloan</p>
+  <p style="font-size:12px;color:var(--text-faint);margin:-4px 0 10px">Harga/kg × multiplier ini = harga Kiloan per durasi.</p>
   ${md.durations.map((d) => `
     <div class="master-row">
       <span style="font-size:14px">${d.name} (${d.time_label})</span>
       <div style="display:flex;gap:8px;align-items:center">
-        <input type="number" step="0.1" id="dur-${d.code}" value="${d.multiplier}" />
-        <button class="btn-secondary btn-sm" data-action="save-duration" data-code="${d.code}">Simpan</button>
+        <input type="number" step="0.1" id="dur-mult-${d.code}" value="${d.multiplier}" style="width:80px" />
+        <button class="btn-secondary btn-sm" data-action="save-duration-mult" data-code="${d.code}">Simpan</button>
+      </div>
+    </div>`).join("")}
+
+  <p class="section-title">Durasi Pengerjaan — Tambahan Satuan (Rp flat)</p>
+  <p style="font-size:12px;color:var(--text-faint);margin:-4px 0 10px">Ditambahkan langsung ke harga/pcs Satuan per durasi (bukan dikali).</p>
+  ${md.durations.map((d) => `
+    <div class="master-row">
+      <span style="font-size:14px">${d.name} (${d.time_label})</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" step="1000" id="dur-surcharge-${d.code}" value="${d.satuan_surcharge}" style="width:100px" />
+        <button class="btn-secondary btn-sm" data-action="save-duration-surcharge" data-code="${d.code}">Simpan</button>
       </div>
     </div>`).join("")}
 
@@ -580,9 +596,14 @@ async function saveKiloan(id) {
   try { await api(`/api/master-data/kiloan/${id}`, { method: "PATCH", body: { price_per_kg: Number(val) } }); await loadMasterData(); render(); }
   catch (err) { state.errorMsg = err.message; render(); }
 }
-async function saveDuration(code) {
-  const val = document.getElementById(`dur-${code}`).value;
+async function saveDurationMult(code) {
+  const val = document.getElementById(`dur-mult-${code}`).value;
   try { await api(`/api/master-data/durations/${code}`, { method: "PATCH", body: { multiplier: Number(val) } }); await loadMasterData(); render(); }
+  catch (err) { state.errorMsg = err.message; render(); }
+}
+async function saveDurationSurcharge(code) {
+  const val = document.getElementById(`dur-surcharge-${code}`).value;
+  try { await api(`/api/master-data/durations/${code}`, { method: "PATCH", body: { satuanSurcharge: Number(val) } }); await loadMasterData(); render(); }
   catch (err) { state.errorMsg = err.message; render(); }
 }
 async function saveBank(id) {
@@ -642,7 +663,8 @@ async function handleAction(e) {
   if (action === "submit-deposit") return submitDeposit(Number(el.dataset.id));
   if (action === "save-item") return saveItem(el.dataset.id);
   if (action === "save-kiloan") return saveKiloan(el.dataset.id);
-  if (action === "save-duration") return saveDuration(el.dataset.code);
+  if (action === "save-duration-mult") return saveDurationMult(el.dataset.code);
+  if (action === "save-duration-surcharge") return saveDurationSurcharge(el.dataset.code);
   if (action === "save-bank") return saveBank(el.dataset.id);
   if (action === "save-qris") return saveQris(el.dataset.id);
 }
