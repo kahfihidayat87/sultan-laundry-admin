@@ -1,7 +1,7 @@
 // ===== The Sultan Laundry — Dashboard Admin =====
 
 const CONFIG = {
-  API_BASE_URL: "https://YOUR-BACKEND-URL.example.com",
+  API_BASE_URL: "https://kahfihidayat87.github.io/sultan-laundry-app/",
 };
 
 const STAGES = {
