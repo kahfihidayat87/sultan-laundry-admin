@@ -13,7 +13,7 @@ const fmt = (n) => "Rp " + Math.round(n || 0).toLocaleString("id-ID");
 
 const state = {
   screen: "login",
-  page: "summary", // summary | orders | payments | master-data
+  page: "summary", // summary | orders | customers | payments | master-data
   token: load("sla_token", null),
   user: load("sla_user", null),
   errorMsg: "",
@@ -27,6 +27,11 @@ const state = {
   verifyInputs: {},
 
   pendingProofs: [],
+
+  customers: [],
+  customerSearch: "",
+  selectedCustomerId: null,
+  selectedCustomer: null,
 
   masterData: null,
   paymentSettings: [],
@@ -128,6 +133,7 @@ function screenDashboard() {
       <p class="role-tag">${state.user?.name || ""} · ${state.user?.role}</p>
       <button class="nav-item ${state.page === "summary" ? "active" : ""}" data-action="page:summary">Ringkasan</button>
       <button class="nav-item ${state.page === "orders" ? "active" : ""}" data-action="page:orders">Order</button>
+      <button class="nav-item ${state.page === "customers" ? "active" : ""}" data-action="page:customers">Pelanggan</button>
       <button class="nav-item ${state.page === "payments" ? "active" : ""}" data-action="page:payments">Verifikasi Pembayaran</button>
       <button class="nav-item ${state.page === "master-data" ? "active" : ""}" data-action="page:master-data">Master Data</button>
       <div style="height:24px"></div>
@@ -137,17 +143,20 @@ function screenDashboard() {
       ${state.errorMsg ? `<div class="notice error">${state.errorMsg}</div>` : ""}
       ${state.page === "summary" ? renderSummary() : ""}
       ${state.page === "orders" ? renderOrders() : ""}
+      ${state.page === "customers" ? renderCustomers() : ""}
       ${state.page === "payments" ? renderPayments() : ""}
       ${state.page === "master-data" ? renderMasterData() : ""}
     </div>
   </div>
-  ${state.selectedOrderId ? renderOrderModal() : ""}`;
+  ${state.selectedOrderId ? renderOrderModal() : ""}
+  ${state.selectedCustomerId ? renderCustomerModal() : ""}`;
 }
 
 async function goPage(page) {
   state.page = page; state.errorMsg = ""; state.screen = "dashboard";
   if (page === "summary") await loadSummary();
   if (page === "orders") await loadOrders();
+  if (page === "customers") await loadCustomers();
   if (page === "payments") await loadPendingProofs();
   if (page === "master-data") await loadMasterData();
   render();
@@ -228,7 +237,8 @@ function renderOrderModal() {
   const o = state.selectedOrder;
   if (!o) return `<div class="overlay" data-action="close-modal"><div class="panel"><p>Memuat...</p></div></div>`;
   const order = o.order;
-  const canVerify = [3, 4].includes(order.status);
+  const canVerify = order.status === 3; // status 4 = sudah pernah diverifikasi, tinggal menunggu konfirmasi selisih
+  const needsDeviationConfirm = order.status === 4;
   const nextTransition = { 1: 2, 2: 3, 5: 6, 6: 7, 7: 8 }[order.status];
 
   return `
@@ -264,6 +274,16 @@ function renderOrderModal() {
       ${canVerify ? `
         <button class="btn-primary full" style="margin-top:14px" data-action="submit-verify" data-id="${order.id}">
           ${state.loading ? "Memproses..." : "Simpan Verifikasi & Timbang"}
+        </button>` : ""}
+
+      ${needsDeviationConfirm ? `
+        <div class="notice" style="margin-top:14px">
+          Selisih harga <strong>${order.price_deviation_pct}%</strong> dari estimasi — menunggu konfirmasi pelanggan lewat app-nya.
+          Kalau pelanggan sudah setuju lewat telepon/WA langsung, Admin bisa lanjutkan manual di sini (wajib isi catatan untuk jejak audit).
+        </div>
+        <textarea id="deviation-notes-${order.id}" placeholder="Contoh: Dikonfirmasi via WA jam 14:30, pelanggan setuju" rows="2"></textarea>
+        <button class="btn-primary full" style="margin-top:10px" data-action="admin-confirm-deviation" data-id="${order.id}">
+          ${state.loading ? "Memproses..." : "Konfirmasi & Lanjutkan ke Proses Cuci"}
         </button>` : ""}
 
       ${nextTransition ? `
@@ -306,6 +326,21 @@ async function transitionStatus(orderId) {
   } catch (err) { state.errorMsg = err.message; render(); }
 }
 
+async function adminConfirmDeviation(orderId) {
+  const notes = document.getElementById(`deviation-notes-${orderId}`)?.value || "";
+  if (!notes.trim()) { state.errorMsg = "Catatan wajib diisi (mis. cara & waktu konfirmasi ke pelanggan)."; render(); return; }
+  state.loading = true; render();
+  try {
+    await api(`/api/orders/${orderId}/admin-confirm-deviation`, { method: "POST", body: { notes } });
+    await openOrder(orderId);
+    await loadOrders();
+  } catch (err) {
+    state.errorMsg = err.message;
+  } finally {
+    state.loading = false; render();
+  }
+}
+
 // ===================== PEMBAYARAN =====================
 async function loadPendingProofs() {
   try { const data = await api("/api/payment-proofs/pending"); state.pendingProofs = data.proofs; }
@@ -341,6 +376,136 @@ async function reviewProof(id, decision) {
     await loadPendingProofs();
     render();
   } catch (err) { state.errorMsg = err.message; render(); }
+}
+
+// ===================== PELANGGAN =====================
+async function loadCustomers() {
+  try {
+    const q = state.customerSearch ? `?search=${encodeURIComponent(state.customerSearch)}` : "";
+    const data = await api(`/api/admin/customers${q}`);
+    state.customers = data.customers;
+  } catch (err) { state.errorMsg = err.message; }
+}
+
+function renderCustomers() {
+  return `
+  <h2 class="page-title">Pelanggan</h2>
+  <input type="text" id="customer-search" placeholder="Cari nama, nomor WA, atau email..." value="${state.customerSearch}" style="margin-bottom:18px" />
+  ${state.customers.length === 0 ? `<p class="empty-state">Tidak ada pelanggan ditemukan.</p>` : `
+  <table>
+    <thead><tr><th>Nama</th><th>Nomor WA</th><th>Membership</th><th>Deposit</th><th>Poin</th><th>Order</th></tr></thead>
+    <tbody>
+      ${state.customers.map((c) => `
+        <tr class="clickable" data-action="open-customer" data-id="${c.id}">
+          <td>${c.name}</td>
+          <td>${c.phone || "-"}</td>
+          <td><span class="pill">${c.membership_tier || "Reguler"}</span></td>
+          <td>${fmt(c.deposit_balance)}</td>
+          <td>${c.loyalty_points} pts</td>
+          <td>${c.total_orders}</td>
+        </tr>`).join("")}
+    </tbody>
+  </table>`}`;
+}
+
+async function openCustomer(id) {
+  state.selectedCustomerId = id;
+  try { state.selectedCustomer = await api(`/api/admin/customers/${id}`); }
+  catch (err) { state.errorMsg = err.message; }
+  render();
+}
+
+function closeCustomerModal() { state.selectedCustomerId = null; state.selectedCustomer = null; render(); }
+
+function renderCustomerModal() {
+  const d = state.selectedCustomer;
+  if (!d) return `<div class="overlay" data-action="close-modal-customer"><div class="panel"><p>Memuat...</p></div></div>`;
+  const c = d.customer;
+
+  return `
+  <div class="overlay" data-action="close-modal-customer">
+    <div class="panel" data-action="stop-propagation">
+      <div class="panel-header">
+        <h3>${c.name}</h3>
+        <button class="close-btn" data-action="close-modal-customer">✕</button>
+      </div>
+
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 4px">${c.phone || "-"} ${c.email ? "· " + c.email : ""}</p>
+      <p style="font-size:12px;color:var(--text-faint);margin:0 0 20px">Bergabung ${new Date(c.created_at).toLocaleDateString("id-ID")}</p>
+
+      <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
+        <div class="stat-card"><p class="label">Membership</p><p class="value" style="font-size:16px">${c.membership_tier || "Reguler"}</p></div>
+        <div class="stat-card"><p class="label">Saldo Deposit</p><p class="value" style="font-size:16px">${fmt(c.deposit_balance)}</p></div>
+        <div class="stat-card"><p class="label">Loyalty Point</p><p class="value" style="font-size:16px">${c.loyalty_points} pts</p></div>
+      </div>
+
+      <p class="section-title">Ubah Membership</p>
+      <div class="field-inline">
+        <select id="membership-tier-${c.id}">
+          ${["Reguler", "Silver", "Gold", "Platinum", "Sultan Gold"].map((t) => `<option value="${t}" ${c.membership_tier === t ? "selected" : ""}>${t}</option>`).join("")}
+        </select>
+        <button class="btn-secondary btn-sm" data-action="save-membership" data-id="${c.id}">Simpan</button>
+      </div>
+
+      <p class="section-title">Kelola Deposit</p>
+      <div class="field-inline">
+        <input type="number" min="1" id="deposit-amount-${c.id}" placeholder="Nominal (Rp)" />
+        <select id="deposit-type-${c.id}" style="max-width:140px">
+          <option value="topup">Tambah (Topup)</option>
+          <option value="deduction">Kurangi</option>
+        </select>
+      </div>
+      <button class="btn-primary full" data-action="submit-deposit" data-id="${c.id}">
+        ${state.loading ? "Memproses..." : "Simpan Perubahan Deposit"}
+      </button>
+
+      <p class="section-title">Histori Deposit</p>
+      ${d.depositHistory.length === 0 ? `<p style="font-size:13px;color:var(--text-faint)">Belum ada transaksi.</p>` : d.depositHistory.map((t) => `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:${t.type === "topup" ? "var(--teal-bright)" : "var(--red)"}">${t.type === "topup" ? "+" : "-"} ${fmt(t.amount)}</span>
+          <span style="color:var(--text-faint)">${new Date(t.timestamp).toLocaleString("id-ID")}</span>
+        </div>`).join("")}
+
+      <p class="section-title">Histori Loyalty Point</p>
+      ${d.loyaltyHistory.length === 0 ? `<p style="font-size:13px;color:var(--text-faint)">Belum ada transaksi.</p>` : d.loyaltyHistory.map((t) => `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:${t.type === "earn" ? "var(--teal-bright)" : "var(--red)"}">${t.type === "earn" ? "+" : "-"} ${t.points} pts</span>
+          <span style="color:var(--text-faint)">${new Date(t.timestamp).toLocaleString("id-ID")}</span>
+        </div>`).join("")}
+
+      <p class="section-title">Order Terakhir</p>
+      ${d.recentOrders.length === 0 ? `<p style="font-size:13px;color:var(--text-faint)">Belum pernah order.</p>` : d.recentOrders.map((o) => `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span>#${o.id} — ${STAGES[o.status]}</span>
+          <span style="color:var(--text-faint)">${o.final_total_price !== null ? fmt(o.final_total_price) : fmt(o.estimated_total_price)}</span>
+        </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+async function saveMembership(id) {
+  const membershipTier = document.getElementById(`membership-tier-${id}`).value;
+  try {
+    await api(`/api/admin/customers/${id}/membership`, { method: "PATCH", body: { membershipTier } });
+    await openCustomer(id);
+    await loadCustomers();
+  } catch (err) { state.errorMsg = err.message; render(); }
+}
+
+async function submitDeposit(id) {
+  const amount = document.getElementById(`deposit-amount-${id}`).value;
+  const type = document.getElementById(`deposit-type-${id}`).value;
+  if (!amount || Number(amount) <= 0) { state.errorMsg = "Isi nominal deposit yang valid."; render(); return; }
+  state.loading = true; render();
+  try {
+    await api(`/api/admin/customers/${id}/deposit`, { method: "POST", body: { amount: Number(amount), type } });
+    await openCustomer(id);
+    await loadCustomers();
+  } catch (err) {
+    state.errorMsg = err.message;
+  } finally {
+    state.loading = false; render();
+  }
 }
 
 // ===================== MASTER DATA =====================
@@ -446,6 +611,14 @@ function bindEvents() {
   document.querySelectorAll("[data-verify-id]").forEach((el) => {
     el.addEventListener("input", (e) => { state.verifyInputs[el.dataset.verifyId] = e.target.value; });
   });
+  const searchInput = document.getElementById("customer-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      state.customerSearch = e.target.value;
+      clearTimeout(window._customerSearchTimeout);
+      window._customerSearchTimeout = setTimeout(async () => { await loadCustomers(); render(); }, 400);
+    });
+  }
 }
 
 async function handleAction(e) {
@@ -461,7 +634,12 @@ async function handleAction(e) {
   if (action === "close-modal") return closeOrderModal();
   if (action === "submit-verify") return submitVerify(Number(el.dataset.id));
   if (action === "transition-status") return transitionStatus(Number(el.dataset.id));
+  if (action === "admin-confirm-deviation") return adminConfirmDeviation(Number(el.dataset.id));
   if (action === "review-proof") return reviewProof(Number(el.dataset.id), el.dataset.decision);
+  if (action === "open-customer") return openCustomer(Number(el.dataset.id));
+  if (action === "close-modal-customer") return closeCustomerModal();
+  if (action === "save-membership") return saveMembership(Number(el.dataset.id));
+  if (action === "submit-deposit") return submitDeposit(Number(el.dataset.id));
   if (action === "save-item") return saveItem(el.dataset.id);
   if (action === "save-kiloan") return saveKiloan(el.dataset.id);
   if (action === "save-duration") return saveDuration(el.dataset.code);
