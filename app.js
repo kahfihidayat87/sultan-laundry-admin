@@ -1,7 +1,7 @@
 // ===== The Sultan Laundry — Dashboard Admin =====
 
 const CONFIG = {
-  API_BASE_URL: "https://kahfihidayat87.github.io/sultan-laundry-app/",
+  API_BASE_URL: "https://kahfihidayat87.github.io/sultan-laundry-app",
 };
 
 const STAGES = {
@@ -61,7 +61,8 @@ function compressImage(file, maxWidth = 1280, quality = 0.8) {
 async function api(path, { method = "GET", body, auth = true } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (auth && state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(`${CONFIG.API_BASE_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const base = CONFIG.API_BASE_URL.replace(/\/+$/, ""); // buang trailing slash, cegah "//api/..."
+  const res = await fetch(`${base}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Terjadi kesalahan.");
   return data;
@@ -76,8 +77,8 @@ function render() {
 function screenLogin() {
   return `
   <div class="login-wrap">
-    <p class="eyebrow serif">The Sultan Laundry</p>
-    <h1 class="serif">Dashboard Admin</h1>
+    <img src="icons/logo-full.png" alt="The Sultan Laundry" style="display:block;margin:0 auto 20px;width:130px" />
+    <p class="eyebrow serif" style="color:var(--teal-bright);font-style:italic">Dashboard Admin</p>
     ${state.errorMsg ? `<div class="notice error">${state.errorMsg}</div>` : ""}
     <label class="field-label">Nomor WA / Email</label>
     <input type="text" id="login-id" placeholder="admin@sultanlaundry.id" />
@@ -120,7 +121,10 @@ function screenDashboard() {
   return `
   <div class="layout">
     <div class="sidebar">
-      <h1 class="serif">The Sultan Laundry</h1>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+        <img src="icons/icon-square.png" alt="" style="width:28px;height:28px" />
+        <h1 class="serif">The Sultan Laundry</h1>
+      </div>
       <p class="role-tag">${state.user?.name || ""} · ${state.user?.role}</p>
       <button class="nav-item ${state.page === "summary" ? "active" : ""}" data-action="page:summary">Ringkasan</button>
       <button class="nav-item ${state.page === "orders" ? "active" : ""}" data-action="page:orders">Order</button>
